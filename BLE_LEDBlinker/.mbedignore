@@ -1,4 +1,10 @@
-mbed-os/features/net/*
-mbed-os/uvisor-mbed-lib/*
-mbed-os/frameworks/*
+mbed-os/rtos/*
+mbed-os/libraries/*
+mbed-os/features/FEATURE_CLIENT/*
+mbed-os/features/FEATURE_COMMON_PAL/*
+mbed-os/features/FEATURE_UVISOR/*
+mbed-os/features/frameworks/*
 mbed-os/features/mbedtls/*
+mbed-os/features/net/*
+mbed-os/features/storage/*
+

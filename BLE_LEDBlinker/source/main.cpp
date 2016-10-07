@@ -20,10 +20,20 @@
 #include "ble/DiscoveredCharacteristic.h"
 #include "ble/DiscoveredService.h"
 
-DigitalOut alivenessLED(LED1, 1);
+DigitalOut col1(P0_4, 0);
+DigitalOut alivenessLED(P0_13, 1);
+
+#define CHAR_LEN 18
 static DiscoveredCharacteristic ledCharacteristic;
 static bool triggerLedCharacteristic;
-static const char PEER_NAME[] = "LED";
+static const char PEER_NAME[] = "Yeelight Blue II";
+static char colourString[] = "CLTMP 6500,100,,,,";
+//static const char PEER_NAME[] = "LED";
+
+/* Avoid the 'stream' overhead */
+RawSerial pc(USBTX, USBRX);
+#define printf pc.printf
+
 
 static EventQueue eventQueue(
     /* event count */ 16 * /* event size */ 32    
@@ -50,13 +60,15 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
         const uint8_t value_length = record_length - 1;
 
         if(type == GapAdvertisingData::COMPLETE_LOCAL_NAME) {
-            if ((value_length == sizeof(PEER_NAME)) && (memcmp(value, PEER_NAME, value_length) == 0)) {
+            printf("Seen Peer: '%s'\r\n", value);
+	    printf("compare a: %d:%d \r\n compare b: %d\r\n", value_length, sizeof(PEER_NAME),(memcmp(value, PEER_NAME, value_length)));
+            if ((value_length <= sizeof(PEER_NAME)) && (memcmp(value, PEER_NAME, value_length) == 0)) {
                 printf(
                     "adv peerAddr[%02x %02x %02x %02x %02x %02x] rssi %d, isScanResponse %u, AdvertisementType %u\r\n",
                     params->peerAddr[5], params->peerAddr[4], params->peerAddr[3], params->peerAddr[2],
                     params->peerAddr[1], params->peerAddr[0], params->rssi, params->isScanResponse, params->type
                 );
-                BLE::Instance().gap().connect(params->peerAddr, Gap::ADDR_TYPE_RANDOM_STATIC, NULL, NULL);
+                BLE::Instance().gap().connect(params->peerAddr, Gap::ADDR_TYPE_PUBLIC, NULL, NULL);
                 break;
             }
         }
@@ -79,13 +91,15 @@ void serviceDiscoveryCallback(const DiscoveredService *service) {
 
 void updateLedCharacteristic(void) {
     if (!BLE::Instance().gattClient().isServiceDiscoveryActive()) {
-        ledCharacteristic.read();
+
+	printf("Writing LED colour\r\n");
+        ledCharacteristic.write(18, (const uint8_t *)&colourString);
     }
 }
 
 void characteristicDiscoveryCallback(const DiscoveredCharacteristic *characteristicP) {
     printf("  C UUID-%x valueAttr[%u] props[%x]\r\n", characteristicP->getUUID().getShortUUID(), characteristicP->getValueHandle(), (uint8_t)characteristicP->getProperties().broadcast());
-    if (characteristicP->getUUID().getShortUUID() == 0xa001) { /* !ALERT! Alter this filter to suit your device. */
+    if (characteristicP->getUUID().getShortUUID() == 0xFFF1) { /* !ALERT! Alter this filter to suit your device. */
         ledCharacteristic        = *characteristicP;
         triggerLedCharacteristic = true;
     }
@@ -100,23 +114,73 @@ void discoveryTerminationCallback(Gap::Handle_t connectionHandle) {
 }
 
 void connectionCallback(const Gap::ConnectionCallbackParams_t *params) {
+    printf("connectionCallback.\r\n");
     if (params->role == Gap::CENTRAL) {
+        printf("Starting service discover\r\n");
         BLE &ble = BLE::Instance();
         ble.gattClient().onServiceDiscoveryTermination(discoveryTerminationCallback);
-        ble.gattClient().launchServiceDiscovery(params->handle, serviceDiscoveryCallback, characteristicDiscoveryCallback, 0xa000, 0xa001);
+        ble.gattClient().launchServiceDiscovery(params->handle, serviceDiscoveryCallback, characteristicDiscoveryCallback, 0xFFF0, 0xFFF1);
     }
 }
 
+/*
+ * copy the char 'padding' into each character in 'buffer' from start to end
+ */
+
+void padString(const int start, const int end, const char padding, char* buffer) {
+	for (int i = start; i < end; i++) {
+		buffer[i] = padding;
+	}
+}
+void formatRGB(const int red, const int green, const int blue, const int brightness, char* buffer) {
+	int len = 0;
+	/* perplexingly, if we keep brightness at 3 digits, the bulb doesn't
+	 * process colour *and* brightness changes together. For example
+	 * 000,255,000,100,,, --> green, 100%
+	 * 255,000,000,050,,, --> still green, but 50%
+	 * whereas if insted "000,255,000,100,,," is followed by "000,255,000,50,,,,"
+	 * the colour and brightness change occurs
+	 */
+	len = sprintf(buffer, "%03d,%03d,%03d,%d,", red, green, blue, brightness);
+	padString(len, CHAR_LEN, ',', buffer);
+
+}
+
+/* temp between 1700-6500, brightness 0-100 */
+void formatColourTemp(const int temp, const int brightness, char* buffer) {
+
+	int len = 0;
+	len = sprintf(buffer, "CLTMP %04d,%d", temp, brightness);
+	padString(len, CHAR_LEN, ',', buffer);
+}
+
 void triggerToggledWrite(const GattReadCallbackParams *response) {
+	static int clrtmp = 1700;
+	static int red=0,green=0,blue=0;
     if (response->handle == ledCharacteristic.getValueHandle()) {
         printf("triggerToggledWrite: handle %u, offset %u, len %u\r\n", response->handle, response->offset, response->len);
         for (unsigned index = 0; index < response->len; index++) {
             printf("%c[%02x]", response->data[index], response->data[index]);
         }
         printf("\r\n");
-
-        uint8_t toggledValue = response->data[0] ^ 0x1;
-        ledCharacteristic.write(1, &toggledValue);
+	if (clrtmp > 6500)
+		clrtmp=1700;
+	if (red > 255)
+		red = 0;
+	if (green > 255)
+		green = 0;
+	if (blue > 255)
+		blue =0;
+	clrtmp+=100;
+	red+=11;
+	green+=21;
+	blue+=41;
+	printf("CLTMP %04d,100,,,,\r\n", clrtmp);
+//	sprintf((char *)&colourString, "CLTMP %04d,100,,,,", clrtmp);
+	formatColourTemp(clrtmp, 100, (char*)&colourString);
+	formatRGB(red,green,blue, 100, (char*)&colourString);
+	printf("%s\r\n", colourString);
+        ledCharacteristic.write(18, (const uint8_t *)&colourString);
     }
 }
 
@@ -176,6 +240,7 @@ int main()
     triggerLedCharacteristic = false;
     eventQueue.post_every(500, periodicCallback);
 
+    printf("Hello. Starting\r\n");
     BLE &ble = BLE::Instance();
     ble.onEventsToProcess(scheduleBleEventsProcessing);
     ble.init(bleInitComplete);
