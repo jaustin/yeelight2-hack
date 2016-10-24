@@ -25,6 +25,8 @@ MicroBit ubit;
 
 DigitalOut col1(P0_0, 0);
 DigitalOut alivenessLED(P0_3);
+int clrtmp = 6500;
+int clrmode = 0;
 
 #define CHAR_LEN 18
 static DiscoveredCharacteristic ledCharacteristic;
@@ -158,30 +160,24 @@ void formatColourTemp(const int temp, const int brightness, char* buffer) {
 }
 
 void triggerToggledWrite(const GattReadCallbackParams *response) {
-	static int clrtmp = 1700;
 	static int red=0,green=0,blue=0;
     if (response->handle == ledCharacteristic.getValueHandle()) {
         printf("triggerToggledWrite: handle %u, offset %u, len %u\r\n", response->handle, response->offset, response->len);
         for (unsigned index = 0; index < response->len; index++) {
             printf("%c[%02x]", response->data[index], response->data[index]);
         }
-        printf("\r\n");
-	if (clrtmp > 6500)
-		clrtmp=1700;
-	if (red > 255)
-		red = 0;
-	if (green > 255)
-		green = 0;
-	if (blue > 255)
-		blue =0;
-	clrtmp+=100;
-	red+=11;
-	green+=21;
-	blue+=41;
-	printf("CLTMP %04d,100,,,,\r\n", clrtmp);
+	red = (1024 + ubit.accelerometer.getX()) >> 3;
+	green = (1024 + ubit.accelerometer.getY()) >> 3;
+	blue = (1024 + ubit.accelerometer.getZ()) >> 3;
+        printf("Values: %d,%d,%d\r\n", red, green, blue);
+	//
+//	printf("CLTMP %04d,100,,,,\r\n", clrtmp);
 //	sprintf((char *)&colourString, "CLTMP %04d,100,,,,", clrtmp);
-	formatColourTemp(clrtmp, 100, (char*)&colourString);
-	formatRGB(red,green,blue, 100, (char*)&colourString);
+	if (clrmode) {
+		formatColourTemp(clrtmp, ((clrtmp>>6) -1), (char*)&colourString);
+	} else {
+		formatRGB(red,green,blue, 100, (char*)&colourString);
+	}
 	printf("%s\r\n", colourString);
         ledCharacteristic.write(18, (const uint8_t *)&colourString);
     }
@@ -237,7 +233,29 @@ void scheduleBleEventsProcessing(BLE::OnEventsToProcessCallbackContext* context)
     BLE &ble = BLE::Instance();
     eventQueue.post(Callback<void()>(&ble, &BLE::processEvents));
 }
+void onButton(MicroBitEvent e)
+{
+    if (e.source == MICROBIT_ID_BUTTON_A) {
+     	if (clrtmp < 6500)
+		clrtmp+=250;
+    }
+ 
+    if (e.source == MICROBIT_ID_BUTTON_B) {
+     	if (clrtmp > 1700)
+		clrtmp-=250;
+    }
 
+    if (e.source == MICROBIT_ID_BUTTON_AB) {
+	clrmode = !clrmode;
+	if (clrmode) {
+		ubit.display.print("W");
+
+	} else {
+		ubit.display.scroll("C");
+	}
+    }
+    
+}
 void memGobble(){
                 int blockSize = 4;
                 int i = 1;
@@ -258,6 +276,10 @@ int main()
     eventQueue.post_every(500, periodicCallback);
     ubit.display.scroll("hi");
     printf("Hello. Starting\r\n");
+    ubit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButton);
+    ubit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButton);
+    ubit.messageBus.listen(MICROBIT_ID_BUTTON_AB, MICROBIT_BUTTON_EVT_CLICK, onButton);
+    
     BLE &ble = BLE::Instance();
     ble.onEventsToProcess(scheduleBleEventsProcessing);
     ble.init(bleInitComplete);
