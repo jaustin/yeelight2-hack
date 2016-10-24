@@ -19,9 +19,12 @@
 #include "ble/BLE.h"
 #include "ble/DiscoveredCharacteristic.h"
 #include "ble/DiscoveredService.h"
+#include "MicroBit.h"
+ 
+MicroBit ubit;
 
-DigitalOut col1(P0_4, 0);
-DigitalOut alivenessLED(P0_13, 1);
+DigitalOut col1(P0_0, 0);
+DigitalOut alivenessLED(P0_3);
 
 #define CHAR_LEN 18
 static DiscoveredCharacteristic ledCharacteristic;
@@ -235,11 +238,25 @@ void scheduleBleEventsProcessing(BLE::OnEventsToProcessCallbackContext* context)
     eventQueue.post(Callback<void()>(&ble, &BLE::processEvents));
 }
 
+void memGobble(){
+                int blockSize = 4;
+                int i = 1;
+                printf("Checking memory with blocksize %d char ...\r\n", blockSize);
+                while (true) {
+                    char *p = (char *) malloc(i * blockSize);
+		    printf("%d\r\n", i*blockSize);
+                    if (p == NULL)
+                        break;
+                    free(p);
+                    ++i;
+                }
+        printf("Ok for %d char\r\n", (i - 1) * blockSize); 
+}
 int main()
 {
     triggerLedCharacteristic = false;
     eventQueue.post_every(500, periodicCallback);
-
+    ubit.display.scroll("hi");
     printf("Hello. Starting\r\n");
     BLE &ble = BLE::Instance();
     ble.onEventsToProcess(scheduleBleEventsProcessing);
