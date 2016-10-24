@@ -44,8 +44,36 @@ static EventQueue eventQueue(
     /* event count */ 16 * /* event size */ 32    
 );
 
-void periodicCallback(void) {
-    alivenessLED = !alivenessLED; /* Do blinky on LED1 while we're waiting for BLE events */
+
+/*
+ * copy the char 'padding' into each character in 'buffer' from start to end
+ */
+
+void padString(const int start, const int end, const char padding, char* buffer) {
+	for (int i = start; i < end; i++) {
+		buffer[i] = padding;
+	}
+}
+void formatRGB(const int red, const int green, const int blue, const int brightness, char* buffer) {
+	int len = 0;
+	/* perplexingly, if we keep brightness at 3 digits, the bulb doesn't
+	 * process colour *and* brightness changes together. For example
+	 * 000,255,000,100,,, --> green, 100%
+	 * 255,000,000,050,,, --> still green, but 50%
+	 * whereas if insted "000,255,000,100,,," is followed by "000,255,000,50,,,,"
+	 * the colour and brightness change occurs
+	 */
+	len = sprintf(buffer, "%03d,%03d,%03d,%d,", red, green, blue, brightness);
+	padString(len, CHAR_LEN, ',', buffer);
+
+}
+
+/* temp between 1700-6500, brightness 0-100 */
+void formatColourTemp(const int temp, const int brightness, char* buffer) {
+
+	int len = 0;
+	len = sprintf(buffer, "CLTMP %04d,%d", temp, brightness);
+	padString(len, CHAR_LEN, ',', buffer);
 }
 
 void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
@@ -54,6 +82,7 @@ void advertisementCallback(const Gap::AdvertisementCallbackParams_t *params) {
     // byte 0: length of the record excluding this byte
     // byte 1: The key, it is the type of the data
     // byte [2..N] The value. N is equal to byte0 - 1
+	printf("advertisment callback \r\n");
     for (uint8_t i = 0; i < params->advertisingDataLen; ++i) {
 
         const uint8_t record_length = params->advertisingData[i];
@@ -97,75 +126,7 @@ void serviceDiscoveryCallback(const DiscoveredService *service) {
 void updateLedCharacteristic(void) {
     if (!BLE::Instance().gattClient().isServiceDiscoveryActive()) {
 
-	printf("Writing LED colour\r\n");
-        ledCharacteristic.write(18, (const uint8_t *)&colourString);
-    }
-}
-
-void characteristicDiscoveryCallback(const DiscoveredCharacteristic *characteristicP) {
-    printf("  C UUID-%x valueAttr[%u] props[%x]\r\n", characteristicP->getUUID().getShortUUID(), characteristicP->getValueHandle(), (uint8_t)characteristicP->getProperties().broadcast());
-    if (characteristicP->getUUID().getShortUUID() == 0xFFF1) { /* !ALERT! Alter this filter to suit your device. */
-        ledCharacteristic        = *characteristicP;
-        triggerLedCharacteristic = true;
-    }
-}
-
-void discoveryTerminationCallback(Gap::Handle_t connectionHandle) {
-    printf("terminated SD for handle %u\r\n", connectionHandle);
-    if (triggerLedCharacteristic) {
-        triggerLedCharacteristic = false;
-        eventQueue.post(updateLedCharacteristic);
-    }
-}
-
-void connectionCallback(const Gap::ConnectionCallbackParams_t *params) {
-    printf("connectionCallback.\r\n");
-    if (params->role == Gap::CENTRAL) {
-        printf("Starting service discover\r\n");
-        BLE &ble = BLE::Instance();
-        ble.gattClient().onServiceDiscoveryTermination(discoveryTerminationCallback);
-        ble.gattClient().launchServiceDiscovery(params->handle, serviceDiscoveryCallback, characteristicDiscoveryCallback, 0xFFF0, 0xFFF1);
-    }
-}
-
-/*
- * copy the char 'padding' into each character in 'buffer' from start to end
- */
-
-void padString(const int start, const int end, const char padding, char* buffer) {
-	for (int i = start; i < end; i++) {
-		buffer[i] = padding;
-	}
-}
-void formatRGB(const int red, const int green, const int blue, const int brightness, char* buffer) {
-	int len = 0;
-	/* perplexingly, if we keep brightness at 3 digits, the bulb doesn't
-	 * process colour *and* brightness changes together. For example
-	 * 000,255,000,100,,, --> green, 100%
-	 * 255,000,000,050,,, --> still green, but 50%
-	 * whereas if insted "000,255,000,100,,," is followed by "000,255,000,50,,,,"
-	 * the colour and brightness change occurs
-	 */
-	len = sprintf(buffer, "%03d,%03d,%03d,%d,", red, green, blue, brightness);
-	padString(len, CHAR_LEN, ',', buffer);
-
-}
-
-/* temp between 1700-6500, brightness 0-100 */
-void formatColourTemp(const int temp, const int brightness, char* buffer) {
-
-	int len = 0;
-	len = sprintf(buffer, "CLTMP %04d,%d", temp, brightness);
-	padString(len, CHAR_LEN, ',', buffer);
-}
-
-void triggerToggledWrite(const GattReadCallbackParams *response) {
 	static int red=0,green=0,blue=0;
-    if (response->handle == ledCharacteristic.getValueHandle()) {
-        printf("triggerToggledWrite: handle %u, offset %u, len %u\r\n", response->handle, response->offset, response->len);
-        for (unsigned index = 0; index < response->len; index++) {
-            printf("%c[%02x]", response->data[index], response->data[index]);
-        }
 	red = (1024 + ubit.accelerometer.getX()) >> 3;
 	green = (1024 + ubit.accelerometer.getY()) >> 3;
 	blue = (1024 + ubit.accelerometer.getZ()) >> 3;
@@ -182,6 +143,51 @@ void triggerToggledWrite(const GattReadCallbackParams *response) {
         ledCharacteristic.write(18, (const uint8_t *)&colourString);
     }
 }
+
+void characteristicDiscoveryCallback(const DiscoveredCharacteristic *characteristicP) {
+    printf("  C UUID-%x valueAttr[%u] props[%x]\r\n", characteristicP->getUUID().getShortUUID(), characteristicP->getValueHandle(), (uint8_t)characteristicP->getProperties().broadcast());
+    if (characteristicP->getUUID().getShortUUID() == 0xFFF1) { /* !ALERT! Alter this filter to suit your device. */
+        ledCharacteristic        = *characteristicP;
+        triggerLedCharacteristic = true;
+    }
+}
+
+void discoveryTerminationCallback(Gap::Handle_t connectionHandle) {
+    printf("terminated SD for handle %u\r\n", connectionHandle);
+    if (triggerLedCharacteristic) {
+        triggerLedCharacteristic = false;
+        eventQueue.post_every(500, updateLedCharacteristic);
+    }
+}
+
+void connectionCallback(const Gap::ConnectionCallbackParams_t *params) {
+    printf("connectionCallback.\r\n");
+    if (params->role == Gap::CENTRAL) {
+        printf("Starting service discover\r\n");
+        BLE &ble = BLE::Instance();
+        ble.gattClient().onServiceDiscoveryTermination(discoveryTerminationCallback);
+        ble.gattClient().launchServiceDiscovery(params->handle, serviceDiscoveryCallback, characteristicDiscoveryCallback, 0xFFF0, 0xFFF1);
+    }
+}
+
+void triggerToggledWrite(const GattReadCallbackParams *response) {
+	static int red=0,green=0,blue=0;
+	red = (1024 + ubit.accelerometer.getX()) >> 3;
+	green = (1024 + ubit.accelerometer.getY()) >> 3;
+	blue = (1024 + ubit.accelerometer.getZ()) >> 3;
+        printf("Values: %d,%d,%d\r\n", red, green, blue);
+	//
+//	printf("CLTMP %04d,100,,,,\r\n", clrtmp);
+//	sprintf((char *)&colourString, "CLTMP %04d,100,,,,", clrtmp);
+	if (clrmode) {
+		formatColourTemp(clrtmp, ((clrtmp>>6) -1), (char*)&colourString);
+	} else {
+		formatRGB(red,green,blue, 100, (char*)&colourString);
+	}
+	printf("%s\r\n", colourString);
+        ledCharacteristic.write(18, (const uint8_t *)&colourString);
+    }
+
 
 void triggerRead(const GattWriteCallbackParams *response) {
     if (response->handle == ledCharacteristic.getValueHandle()) {
@@ -219,8 +225,8 @@ void bleInitComplete(BLE::InitializationCompleteCallbackContext *params)
     ble.gap().onDisconnection(disconnectionCallback);
     ble.gap().onConnection(connectionCallback);
 
-    ble.gattClient().onDataRead(triggerToggledWrite);
-    ble.gattClient().onDataWrite(triggerRead);
+    //ble.gattClient().onDataRead(triggerToggledWrite);
+    //ble.gattClient().onDataWrite(triggerRead);
 
     // scan interval: 400ms and scan window: 400ms.
     // Every 400ms the device will scan for 400ms
@@ -251,7 +257,7 @@ void onButton(MicroBitEvent e)
 		ubit.display.print("W");
 
 	} else {
-		ubit.display.scroll("C");
+		ubit.display.print("C");
 	}
     }
     
@@ -273,9 +279,9 @@ void memGobble(){
 int main()
 {
     triggerLedCharacteristic = false;
-    eventQueue.post_every(500, periodicCallback);
+    //eventQueue.post_every(500, triggerToggledWrite());
     ubit.display.scroll("hi");
-    printf("Hello. Starting\r\n");
+    //printf("Hello. Starting\r\n");
     ubit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButton);
     ubit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButton);
     ubit.messageBus.listen(MICROBIT_ID_BUTTON_AB, MICROBIT_BUTTON_EVT_CLICK, onButton);
