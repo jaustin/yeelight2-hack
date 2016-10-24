@@ -23,10 +23,9 @@
  
 MicroBit ubit;
 
-DigitalOut col1(P0_0, 0);
-DigitalOut alivenessLED(P0_3);
 int clrtmp = 6500;
-int clrmode = 0;
+static bool clrmode = 0;
+int task_id = 0;
 
 #define CHAR_LEN 18
 static DiscoveredCharacteristic ledCharacteristic;
@@ -156,7 +155,7 @@ void discoveryTerminationCallback(Gap::Handle_t connectionHandle) {
     printf("terminated SD for handle %u\r\n", connectionHandle);
     if (triggerLedCharacteristic) {
         triggerLedCharacteristic = false;
-        eventQueue.post_every(500, updateLedCharacteristic);
+        task_id = eventQueue.post_every(500, updateLedCharacteristic);
     }
 }
 
@@ -198,6 +197,7 @@ void triggerRead(const GattWriteCallbackParams *response) {
 void disconnectionCallback(const Gap::DisconnectionCallbackParams_t *) {
     printf("disconnected\r\n");
     /* Start scanning and try to connect again */
+    eventQueue.cancel(task_id);
     BLE::Instance().gap().startScan(advertisementCallback);
 }
 
