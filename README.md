@@ -1,3 +1,13 @@
+# WARNING You probably don't want this.
+
+I've published this repo, warts and all, as I don't seem to find time to tidy it up and share it more usefully.
+
+I've modified the mbed standard LEDBlinker example to search for and connect to a Yeelight Blue ii bulb. 
+
+The micro:bit DAL uses a fork of the mbed BLE API that has a slightly different implementation (to save a few precious bytes of memory!) so using this with the mbed standard BLE stack requires hacking out the micro:bit BLE stuff - which is fine, because I wanted to use the standard mbed BLE APIs - it's just done in a horrible way here.
+
+To be a GAP Central this needs to be built with S130.
+
 # BLE Examples
 This repo contains a collection of BLE example applications based on
 mbed OS and built with [mbed-cli](https://github.com/ARMmbed/mbed-cli). Each example subdirectory contains a separate mbed-cli module meant for building an executable.
